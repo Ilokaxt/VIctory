@@ -35,6 +35,8 @@ mod thunks;
 mod tls;
 #[cfg(windows)]
 mod windows;
+#[cfg(windows)]
+mod zen2;
 
 #[cfg(windows)]
 pub use crash::{
@@ -54,6 +56,8 @@ pub use thunks::{UnimplementedPolicy, unimplemented_call_count};
 pub use windows::{
     BindReport, LoadedImage, MissingImport, WithTitleDlls, load, load_title_dll, load_title_dlls,
 };
+#[cfg(windows)]
+pub use zen2::emulate_zen2;
 
 /// `DLL_PROCESS_ATTACH`, for TLS callbacks.
 pub const DLL_PROCESS_ATTACH: u32 = 1;
