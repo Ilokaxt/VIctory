@@ -597,8 +597,10 @@ impl State {
     /// constant buffer are made afresh for the draw in dynamic slots, with
     /// the constant data copied to upload memory when the list is
     /// submitted: the host wants constant buffers 256-byte aligned, the
-    /// console only 16. Returns those tables' new byte offsets by root
-    /// parameter; the other tables' slots are made from the title's.
+    /// console only 16. So are tables past the slots the host heap mirrors
+    /// in place (a title heap larger than the host allows). Returns those
+    /// tables' new byte offsets by root parameter; the other tables' slots
+    /// are made from the title's.
     ///
     /// Within a list, the same table holding the same descriptors is made
     /// once: its constant data is copied at submission either way, and the
@@ -606,10 +608,24 @@ impl State {
     /// draw, wrapping the dynamic slots onto lists not yet submitted.
     fn tables(&mut self, list: &HostList, used: &[UsedResource], compute: bool) -> Vec<(u8, u32)> {
         let tables = |u: &&UsedResource| u.root == RootType::Table;
+        let past_the_host = |u: &&UsedResource| {
+            let Some(&Root::Table(table)) = self.roots_ref(compute).get(usize::from(u.slot)) else {
+                return false;
+            };
+            let end = used
+                .iter()
+                .filter(|v| v.root == RootType::Table && v.slot == u.slot)
+                .map(|v| v.table_offset_dwords / 8 + 1)
+                .max()
+                .unwrap_or(1);
+            self.heap_of(table)
+                .and_then(|heap| Some((heap.host()?, heap.index(table)?)))
+                .is_some_and(|(host, index)| !host.mirrors(index, end))
+        };
         let mut fresh: Vec<u8> = used
             .iter()
             .filter(tables)
-            .filter(|u| u.kind == ResourceType::Cbv)
+            .filter(|u| u.kind == ResourceType::Cbv || past_the_host(u))
             .map(|u| u.slot)
             .collect();
         fresh.sort_unstable();

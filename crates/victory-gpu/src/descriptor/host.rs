@@ -88,8 +88,10 @@ impl HostHeap {
         let (heap, count) = match make(count + extra) {
             Ok(heap) => (heap, count),
             Err(e) if !sampler && count + extra > PORTABLE_VIEWS => {
-                // shortcut: descriptors past the host's limit are left out;
-                // a title that reaches them needs remapping.
+                // Slots past the host's limit are not mirrored in place: a
+                // draw reading a table there gets it made in dynamic slots.
+                // shortcut: a shader indexing the heap past the limit from a
+                // root constant, not through a table, still reads nothing.
                 tracing::warn!(error = %e, count, "host view heap capped at {PORTABLE_VIEWS}");
                 (make(PORTABLE_VIEWS).ok()?, PORTABLE_VIEWS - extra)
             }
@@ -291,6 +293,12 @@ impl HostHeap {
             host.device
                 .CreateConstantBufferView(Some(&desc), self.cpu(index))
         };
+    }
+
+    /// Whether the title's slots `index..index + n` are mirrored in place
+    /// (not past the host's limit).
+    pub(crate) fn mirrors(&self, index: u32, n: u32) -> bool {
+        index.checked_add(n).is_some_and(|end| end <= self.count)
     }
 
     fn cpu(&self, index: u32) -> D3D12_CPU_DESCRIPTOR_HANDLE {
@@ -848,5 +856,18 @@ mod tests {
         heap.release(a, 50);
         assert_eq!(heap.dynamic(50), Some(4));
         assert_eq!(heap.dynamic(40), Some(4 + DYNAMIC - 40));
+    }
+
+    /// Only the title's own slots are mirrored in place, not the dynamic
+    /// ones after them.
+    #[test]
+    fn tables_past_the_mirrored_slots_are_not_in_place() {
+        let Some(heap) = HostHeap::new(false, 4) else {
+            return; // no host GPU
+        };
+        assert!(heap.mirrors(0, 4));
+        assert!(heap.mirrors(3, 1));
+        assert!(!heap.mirrors(3, 2));
+        assert!(!heap.mirrors(u32::MAX, 2));
     }
 }
